@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+
+<head>
+
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+
+	<title>Fractal Explorer</title>
+	<meta name="Description" content="Fractal Explorer, by James Wilson. An online HTML5 tool for visualizing, exploring and saving images from Mandelbrot and Julia set fractals. With this tool you can zoom in and explore the fractal, configure key parameters, turn on multi-threading for faster fractal rendering, increase the quality, and save and share links to what you discover."/>
+	<meta name="keywords" content="Web development projects by James Wilson."/>
+	<link href="css/style.css" rel="stylesheet" type="text/css"/>
+	<link href='//fonts.googleapis.com/css?family=Bree+Serif' rel='stylesheet' type='text/css'>
+	<script type="text/javascript" src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+	<script type="text/javascript" src="js/jq.mousewheel.js"></script>
+	<script type="text/javascript" src="js/colorpicker.min.js"></script>
+	<script type="text/javascript" src="js/jw.fractalshared.js"></script>
+	<script type="text/javascript" src="js/jw.fractal.js"></script>
+</head>
+
+<body>
+
+	<canvas class="canvas" id="fractal-canvas" width="500" height="500">
+	Welcome to James's Fractal Explorer. Your browser needs to support the HTML5 canvas element in order to use this web application (Internet explorer 9 and above, and modern versions of chrome, firefox and safari shouldn't be a problem!).
+	</canvas>
+
+	<canvas class="canvas" id="input-canvas" width="500" height="500">
+	</canvas>
+
+<div id="options-wrapper">
+
+<div id="options">
+	<div class="option-area" id="option-colours">
+		<div id="colour-wrapper"></div>
+	</div>
+	<div class="option-area" id="option-options">
+		<div id="wrapper">
+			<div id="options-algorithm" class="option-surrounding">
+				<div class="option-surrounding-title">Algorithm</div>
+			</div>
+			<div id="options-positional" class="option-surrounding">
+				<div class="option-surrounding-title">Position</div>
+			</div>
+			<div id="options-visual" class="option-surrounding">
+				<div class="option-surrounding-title">Visual</div>
+			</div>
+			<div id="options-performance" class="option-surrounding">
+				<div class="option-surrounding-title">Performance</div>
+			</div>
+		</div>
+	</div>
+	<div class="option-area" id="option-save">
+		<div id="wrapper">
+			<div id="options-savelink" class="option-surrounding">
+				<div class="option-surrounding-title">Save Link</div>
+			</div>
+			<div id="options-saveimage" class="option-surrounding">
+				<div class="option-surrounding-title">Save Image</div>
+				<div id="option-save-aspect" title="Break this link if you don't want to maintain the aspect ratio of the current window. regardless of the dimensions, the saved image will always encompass what is visible on the screen."></div>
+			</div>
+		</div>
+	</div>
+	<div class="option-area" id="option-about">
+		<div id="wrapper">
+		<h1>About.</h1>
+		<p>The Fractal Explorer is a web application created by <em>James Wilson</em>. Visit my <a class="link" href="http://unbui.lt">homepage</a> for more goodness!</p>
+		<h1>Quick Tips.</h1>
+		<ol>
+			<li>Hover over an option to see more information about it.</li>
+			<li>Insert colours by clicking on the gradient. Click on them to change them. They can be dragged by their top handle.</li>
+			<li>As well as dragging a box to zoom in on a region, you can use the mouse wheel and arrow keys to navigate the fractal.</li>
+			<li>Show others your fractals by using the link on the save tab; share the goodness!</li>
+			<li>Not sure what something does? Experiment! You can't go wrong, and you can always start over.</li>
+		</ol>
+		</div>
+	</div>
+</div>
+
+</div>
+
+<div id="tabs">
+	<div class="tab" id="tab-colours">Colours</div><div class="tab off" id="tab-options">Options</div><div class="tab off" id="tab-save">Save</div><div class="tab off" id="tab-about">About</div>
+</div>
+
+<div id="controls">
+	<div id="control-options" class="control"></div>
+	<div id="control-zoomin" class="control"></div>
+	<div id="control-zoomout" class="control"></div>
+</div>
+
+
+<div id="stats">Zoom: <span id="stat-zoom"></span>x</div>
+<div id="status">
+	<div id="loading">Loading: <span id="stat-loading"></span>%</div>
+	<div id="saving"></div>
+</div>
+
+<div id="saved-image-container">
+	<div id="wrapper">
+	<div class="kill"></div>
+	<img id="saved-image"></img>
+	</div>
+</div>
+
+<script type="text/javascript">
+
+function parseQueryString(parsed)
+	{
+	if(typeof parsed != "object") parsed = {};
+	var query = window.location.search.substring(1).split("&");
+	var l = query.length, final_arg;
+	for(var i = 0; i < l; i++)
+		{
+		var arg = unescape(query[i]).split("=");
+		if(arg.length == 1) parsed[arg[0].trim()] = true;
+		else 
+			{
+			final_arg = arg[1].trim();
+			final_arg = parseFloat(final_arg)+""==final_arg? parseFloat(final_arg) : final_arg;
+			parsed[arg[0].trim()] = final_arg;
+			}
+		}
+	return parsed;
+	};
+
+//default settings:
+var q = {
+	col:"r0g0b100p0r100g255b100p0.1r255g255b255p0.25r50g0b255p0.4r255g255b50p0.6r0g100b150p0.8r0g0b0p1",
+	alg:"mandelbrot",
+	c1:0,
+	c2:0,
+	sx:1.4,
+	sy:1.4,
+	cx:-0.7,
+	cy:0,
+	mi:400
+	};
+//replace settings with those in querystring if exists:
+parseQueryString(q);
+
+
+var centrex = q.cx, centrey = q.cy, scalex = q.sx, scaley = q.sy;
+var start_sx, start_sy;
+var tabs_on = false;
+var save_aspect_ratio = true;
+var w, h, s;
+var is_touch_device = false;
+
+var $f_canvas = $("#fractal-canvas");
+var f_canvas = $f_canvas.get(0);
+var $i_canvas = $("#input-canvas");
+var i_canvas = $i_canvas.get(0);
+var $loading = $("#loading");
+var $statloading = $("#stat-loading");
+var $saving = $("#saving");
+
+var $savedimagecontainer = $("#saved-image-container");
+var $savedimagewrapper = $("#saved-image-container #wrapper");
+var $savedimage = $("#saved-image");
+
+
+var fractal = new FractalMachine();
+var save_fractal = new FractalMachine();
+var colours = new ColourRange();
+colours.load(q.col);
+
+function isTouchDevice() {
+  return !!('ontouchstart' in window) ? 1 : 0;
+}
+
+function resetFractal()
+	{
+	fractal.set({
+		canvas: f_canvas,
+		colours: colours,
+		lf: loading,
+		loadspeed:20,
+		quality:1,
+		algorithm: q.alg,
+		smoothing:true,
+		mi:q.mi,
+		c1:q.c1,
+		c2:q.c2
+		});
+	}
+resetFractal();
+
+
+function resetOptions()
+	{
+	centrex = q.cx;
+	centrey = q.cy;
+	scalex = q.sx;
+	scaley = q.sy;
+
+	resetFractal();
+	}
+
+function refresh()
+	{
+	fractal.refresh(f_canvas);
+	$("#save-link").trigger("refresh");
+	}
+
+function canvasResize()
+	{
+	var oldw = w, oldh = w;
+	w = $(window).width();
+	h = $(window).height();
+	$f_canvas.attr("width", w).attr("height", h);
+	$i_canvas.attr("width", w).attr("height", h);
+	$("#colour-wrapper").gradientBar({cr:colours, change:refresh});
+	drawFractal(centrex, centrey, scalex, scaley);
+	if(tabs_on && oldw != w) toggleTabs();
+	layoutSavedImage();
+	}
+
+function rectToScale(x1, y1, x2, y2)
+	{
+	var left = Math.min(x1, x2);
+	var top = Math.min(y1, y2);
+	var hwidth = Math.abs(x1 - x2)/2;
+	var hheight = Math.abs(y1 - y2)/2;
+	var ratiox = (fractal.set("sx")*2) / w;
+	var ratioy = (fractal.set("sy")*2) / h;
+	scalex = ratiox * hwidth;
+	scaley = ratioy * hheight;
+	centrex = centrex + ratiox * (left + hwidth - w/2);
+	centrey = centrey + ratioy * (top + hheight - h/2);
+	}
+
+function zoomFromScale()
+	{
+	var sx = fractal.set("sx"), sy = fractal.set("sy");
+	return (sx < sy)? 1.4/sx : 1.4/sy;
+	}
+function scaleFromZoom(zoom)
+	{
+	var scalex, scaley;
+	if(fractal.set("sx") < fractal.set("sy"))
+		{
+		scalex = 1.4/zoom;
+		scaley = scalex * (h/w);
+		}
+	else
+		{
+		scaley = 1.4/zoom;
+		scalex = scaley * (w/h);
+		}
+	return [scalex, scaley];
+	}
+
+var writeStats = (function()
+	{
+	var $zoom = $("#stats").children("#stat-zoom");
+	return function()
+		{
+		//zoom:
+		var zoom = zoomFromScale();
+		if(zoom < 100) $zoom.html(zoom.toFixed(2));
+		else $zoom.html(zoom.toFixed(0));
+		}
+	})();
+
+var refreshOptions = (function()
+	{
+	var $opts = $("#options");
+	
+	return function()
+		{
+		$opts.find("[name]").trigger("refresh");
+		}
+	})();
+
+function pointToCentre(x, y)
+	{
+	var ratiox = (fractal.set("sx")*2) / w;
+	var ratioy = (fractal.set("sy")*2) / h;
+	
+	var xdelta = w/2 - x, ydelta = h/2 - y;
+	centrex = centrex - (ratiox * xdelta);
+	centrey = centrey - (ratioy * ydelta);
+	}
+
+function calculateDrawingScale(width, height, sx, sy)
+	{
+	var xratio = sx/width, yratio = sy/height;
+	if(xratio > yratio) sy = height * xratio;
+	else if(yratio > xratio) sx = width * yratio;
+	return [sx, sy];
+	}
+
+function drawFractal()
+	{
+	var a = calculateDrawingScale(w,h,scalex,scaley);
+	
+	fractal.set({
+		sx: a[0],
+		sy: a[1],
+		cx: centrex,
+		cy: centrey
+		});
+
+	fractal.draw(true);
+	writeStats();
+	refreshOptions();
+	}
+
+function layoutSavedImage()
+	{
+	var s = $savedimage.data("size");
+	if(typeof s == "undefined") return;
+
+	var new_w, new_h, px, py;
+	if((s.w+40)/w >= (s.h+40)/h) //constrain by width
+		{
+		new_w = w - 80;
+		new_h = s.h * (new_w/s.w);
+		}
+	else //constrain by height
+		{
+		new_h = h - 80;
+		new_w = s.w * (new_h/s.h);
+		}
+	px = (w-new_w-40)/2;
+	py = (h-new_h-40)/2;
+	$savedimage.attr({width: new_w, height: new_h});
+	$savedimagewrapper.css({left:px, top:py, paddingTop: 20, paddingLeft: 20, paddingBottom: 20, paddingRight: 20});
+	}
+
+function saveFractal(width, height, quality)
+	{
+	function view()
+		{
+		$savedimagecontainer.css("display", "block");
+		}
+	function cancel() 
+		{
+		$saving.off();
+		$saving.css("display", "none");
+		$savedimagecontainer.css("display", "none");
+		$savedimage.attr("src", "");
+		save_fractal.cancel();
+		}
+	function saving(current, total)
+		{
+		if(current!= total)
+			{
+			var percentage = current/total*100;
+			$statsaving.html(percentage.toFixed(2));
+			}
+		else finishedSaving();
+		}
+	function finishedSaving()
+		{
+		save_fractal.cleanUp(); //kills background worker threads etc to prevent memory leak.
+		$savedimage.data("size", {w: width, h: height});
+		$savedimage.attr("src", c.get(0).toDataURL("image/png"));
+		layoutSavedImage();
+
+		//output = c.get(0).toDataURL("image/png");
+		$saving.html('Saved: <span class="link" id="view-saved-img">view</span> \/ <span class="link" id="cancel-saved-img">delete</span>');
+		}
+
+	$saving.css("display", "block");
+	$saving.html('Saving: <span id="stat-saving"></span>% \/ <span class="link" id="cancel-saved-img">cancel</span>');
+	var $statsaving = $("#stat-saving");
+	$saving.on("click","#cancel-saved-img", cancel);
+	$saving.on("click","#view-saved-img", view);
+
+	var a = 	calculateDrawingScale(width,height,fractal.set("sx"),fractal.set("sy"));
+	var c = $('<canvas width="'+width+'" height="'+height+'"></canvas>');
+	var speed = (quality > 0)? 10/(quality) : 10;
+	var temp_colours = new ColourRange(colours.getLevel());
+	temp_colours.load(colours.save());
+	save_fractal.set({
+		canvas: c.get(0),
+		colours: temp_colours, 
+		sx:a[0], 
+		sy: a[1], 
+		cx: centrex, 
+		cy: centrey,
+		algorithm: fractal.set("algorithm"),
+		threads: fractal.set("threads"),
+		mi: fractal.set("mi"),
+		lf: saving,
+		quality: (quality <= 0)? 1 : quality,
+		smoothing: (quality == 0)? false : true, 
+		loadspeed:speed
+		});
+	save_fractal.draw(false);
+	}
+
+function loading(one, two)
+	{
+	if(one != two)
+		{
+		$loading.css("display", "block");
+		var percentage = one/two*100;
+		$statloading.html(percentage.toFixed(2));
+		}
+	else $loading.css("display", "none")
+	}
+
+function clearCanvas(c)
+	{
+	var ctx = c.getContext("2d");
+	ctx.clearRect(0,0,c.width,c.height);
+	}
+
+function panUp()
+	{
+	centrey = centrey - scaley/5;
+	drawFractal();
+	}
+
+function panDown()
+	{
+	centrey = centrey + scaley/5;
+	drawFractal();
+	}
+
+function panLeft()
+	{
+	centrex = centrex - scalex/5;
+	drawFractal();
+	}
+
+function panRight()
+	{
+	centrex = centrex + scalex/5;
+	drawFractal();
+	}
+
+function zoomIn(amount)
+	{
+	if(typeof amount == "undefined") amount = 3;
+	scalex = scalex/3;
+	scaley = scaley/3;
+	drawFractal();
+	}
+
+function zoomOut(amount)
+	{
+	if(typeof amount == "undefined") amount = 3;
+	scalex = scalex*3;
+	scaley = scaley*3;
+	drawFractal();
+	}
+
+function touchStart(e) //after one touch, set second touch to touchZoom for half a second.
+	{
+	var coords = [e.originalEvent.touches[0].pageX, e.originalEvent.touches[0].pageY];
+	var timeout;
+	var i_ctx = i_canvas.getContext("2d");
+	i_ctx.lineWidth = 2;
+	i_ctx.strokeStyle = "rgba(255,0,0,0.5)";
+	i_ctx.beginPath();
+	i_ctx.arc(coords[0], coords[1], 40, 0, Math.PI*2);
+	i_ctx.stroke();
+
+	$i_canvas.one("touchstart.zoom", function(e) 
+		{
+		clearTimeout(timeout);
+		i_ctx.clearRect(0,0,w, h);
+		var new_coords = [e.originalEvent.touches[0].pageX, e.originalEvent.touches[0].pageY], distance = 20;
+		if(Math.abs(new_coords[0] - coords[0]) < distance && Math.abs(new_coords[1] - coords[1]) < distance)
+			{ touchZoom.call(this, e); }
+		$i_canvas.one("touchstart", function(e) {touchStart.call(this, e);});
+		});
+
+	timeout = setTimeout(function()
+		{
+		i_ctx.clearRect(0,0,w, h);
+		$i_canvas.off("touchstart.zoom");
+		$i_canvas.one("touchstart", function(e) {touchStart.call(this, e);});
+		}, 500);
+	}
+
+function touchZoom(e)
+	{
+	e.preventDefault();
+	var coords = [];
+	coords.push(e.originalEvent.touches[0].pageX);
+	coords.push(e.originalEvent.touches[0].pageY);
+	var unit = fractal.set("sx")*2/w;
+	centrex = centrex + (coords[0]-w/2) * unit;
+	centrey = centrey + (coords[1]-h/2) * unit;
+	scalex = fractal.set("sx")/3;
+	scaley = fractal.set("sy")/3;
+	drawFractal();
+	}
+
+function changeTab()
+	{
+	var $this = $(this);
+	$this.parent().children(".tab").addClass("off").attr("style", "");
+	$this.removeClass("off").css({borderTop: "0px", zIndex:"11"});
+	var $option = $("#" + $this.attr("id").replace("tab-", "option-"));
+	var $container = $("#options");
+	var containeroffset = $container.offset();
+	var optionoffset = $option.offset();
+	var optionheight = $option.height();
+	$container.stop().animate({height: optionheight, marginLeft:containeroffset.left-optionoffset.left}, 300);
+	}
+
+function toggleTabs()
+	{
+	var $tabs = $("#tabs");
+	var $control = $("#control-options");
+	if(!tabs_on)
+		{
+		$control.addClass("control-options-on");
+		$("#controls").animate({marginTop:"+="+$tabs.height()}, 150);
+		$tabs.animate({marginLeft:-1}, 200);
+		changeTab.call($(".tab").not(".off").get(0));
+		tabs_on = true;
+		}
+	else
+		{
+		$control.removeClass("control-options-on");
+		$("#controls").animate({marginTop:"-="+$tabs.height()}, 150);
+		$tabs.animate({marginLeft:-$tabs.width()}, 200);
+		$("#options").animate({height:0}, 200);
+		tabs_on = false;
+		}
+	}
+
+function zoomRectangle(e)
+	{
+	if(e.which == 1)
+		{
+		var i_ctx = i_canvas.getContext("2d");
+		i_ctx.strokeStyle = "#ffffff";
+		i_ctx.lineWidth = 2;
+
+		var startX = e.pageX, startY = e.pageY;
+		var $this = $(this);
+
+		$(document).on("mousemove.draw", function(e)
+			{
+			clearCanvas(i_canvas);
+			var width = e.pageX - startX, height = e.pageY - startY;
+			if(Math.abs(width) > 5 && Math.abs(height) > 5)
+				{
+				i_ctx.beginPath();
+				i_ctx.strokeRect(startX,startY,width,height);
+				i_ctx.stroke();
+				}
+			});
+
+		$(document).one("mouseup.draw", function(e)
+			{
+			$(document).off(".draw");
+			clearCanvas(i_canvas);
+			if(Math.abs(e.pageX-startY) > 5 && Math.abs(e.pageY-startY) > 5) 
+				{
+				rectToScale(startX, startY, e.pageX, e.pageY);
+				drawFractal();
+				}
+			});
+
+		}
+	}
+
+function toggleAspect()
+	{
+	var $this = $(this);
+	if(save_aspect_ratio)
+		{
+		$this.addClass("option-save-aspect-on");
+		save_aspect_ratio = false;
+		}
+	else
+		{
+		$this.removeClass("option-save-aspect-on");
+		save_aspect_ratio = true;
+		}
+	}
+
+function enforceFloat(e, $input)
+	{
+	$input.val(parseFloat($input.val()));
+	}
+function enforceInt(e, $input)
+	{
+	$input.val(parseInt($input.val()));
+	}
+
+function setRange(value)
+	{
+	fractal.set("mi", value);
+	colours.setLevel(value);
+	}
+
+function setAlgorithm(e, $input)
+	{
+	fractal.set("algorithm", $input.val());
+	}
+
+function setConstant1(e, $input)
+	{
+	var v = parseFloat($input.val());
+	if(!isNaN(v)) {fractal.set("c1", v);}
+	else $.error("Error: couldn't set c1."); 
+	}
+
+function setConstant2(e, $input)
+	{
+	var v = parseFloat($input.val());
+	if(!isNaN(v)) {fractal.set("c2", v);}
+	else $.error("Error: couldn't set c2."); 
+	}
+
+function setCentreX(e, $input)
+	{
+	var v = parseFloat($input.val());
+	if(!isNaN(v)) { centrex = v; }
+	else $.error("Error: couldn't set centrex."); 
+	}
+
+function setCentreY(e, $input)
+	{
+	var v = parseFloat($input.val());
+	if(!isNaN(v)) { centrey = v; }
+	else $.error("Error: couldn't set centrey."); 
+	}
+
+function setZoom(e, $input)
+	{
+	var v = parseFloat($input.val());
+	if(!isNaN(v))
+		{
+		var a = scaleFromZoom($input.val());
+		scalex = a[0];
+		scaley = a[1];
+		}
+	else $.error("Error: couldn't set zoom level.");
+	}
+
+function setMaxIters(e, $input)
+	{
+	var v = parseInt($input.val());
+	if(!isNaN(v)) { fractal.set("mi", v); colours.setLevel(v); }
+	else $.error("Error: couldn't set max iters.");
+	}
+
+function setQuality(e, $select)
+	{
+	var v = parseInt($select.val());
+	fractal.set("quality", (v == 0)? 1 : v);
+	fractal.set("smoothing", (v == 0)? false : true);
+	var load = parseInt(40/fractal.set("quality"));
+	if(!isNaN(load) && load <= 40 && load >= 0) fractal.set("loadspeed", load);
+	}
+
+function setThreads(e, $input)
+	{
+	var v = parseInt($input.val());
+	if(!isNaN(v)) { fractal.set("threads", v); }
+	else $.error("Error: couldn't set threads");
+	}
+
+function getLink()
+	{
+	return window.location.href+'?col='+colours.save()+'&alg='+fractal.set("algorithm")+'&c1='+fractal.set("c1")+'&c2='+fractal.set("c2")+'&sx='+scalex+'&sy='+scaley+'&cx='+centrex+'&cy='+centrey+'&mi='+fractal.set("mi");
+	}
+
+function setLink(e, $select)
+	{
+	$select.val(getLink());
+	}
+
+function setAspectRatio(val, width)
+	{
+	var ar = w/h;
+	if(width) return val/ar;
+	else return val * ar;
+	}
+
+function setSaveWidth(e, $select)
+	{
+	enforceInt(false, $select);
+	if(save_aspect_ratio)
+		{
+		var h = parseInt(setAspectRatio($select.val(), true));
+		$("#save-height").val(h);
+		}
+	}
+
+function setSaveHeight(e, $select)
+	{
+	enforceInt(false, $select);
+	if(save_aspect_ratio)
+		{
+		var w = parseInt(setAspectRatio($select.val(), false));
+		$("#save-width").val(w);
+		}
+	}
+
+function addTextOption(options)
+	{
+	var id = options.id;
+	var $el = $('<div class="option" title="'+((options.title)?options.title:"")+'"><label id="text" for="'+id+'">'+options.text+':</label><input type="text" id="'+id+'" name="'+id+'"></input></div>');
+	var $input = $el.children("input");
+	var a = {};
+	if(options.size) a.size = options.size;
+	if(options.maxlength) a.maxlength = options.maxlength;
+	$input.attr(a);
+	if(options.change)
+		{
+		$input.on("change", function(e) { options.change.call(this, e, $input); });
+		}
+	if(options.set) $input.on("set", function(e) { options.set.call(this, e, $input); });	
+	if(options.refresh)
+		{
+		$input.on("refresh", function(e) { options.refresh.call(this, e, $input); });
+		$input.trigger("refresh");
+		}
+	return $el;
+	}
+
+function addDropdownOption(options)
+	{
+	var id = options.id;
+	var o = '<select name="'+id+'" id="'+id+'">', d, selected = -1;
+	if(typeof options.selected == "number") selected = parseInt(options.selected)
+	for(var i = 0; i < options.items.length; i++) 
+		{
+		d = options.items[i];
+		if(!d.text) d.text = d.value;
+		if(!d.title) d.title = "";
+		o += '<option '+((i==options.selected)?'selected="selected" ':'')+'value="'+d.value+'" title="'+d.title+'">'+d.text+'</option>';
+		}
+	o += '</select>'
+	var $el = $('<div class="option" title="'+((options.title)?options.title:"")+'"><label id="text" for="'+id+'">'+options.text+':</label>'+o);
+	var $select = $el.children("select");
+	if(options.set) $select.on("set", function(e) { options.set.call(this, e, $select); });
+	if(options.refresh)
+		{
+		$select.on("refresh", function(e) { options.refresh.call(this, e, $select); });
+		$select.trigger("refresh");
+		}
+	return $el;
+	}
+
+$(document).ready(function()
+	{
+	if(isTouchDevice()) is_touch_device = true;
+
+	//add in configuration options:
+	$("#options-algorithm").append(
+		addDropdownOption({
+			id: "option-algorithm",
+			text: "Algorithm",
+			title: "Pick the fractal algorithm you'd like to use. For Julia, you'll need to play around and find good values for C1 and C2. One way to do this is finding the X and Y values corresponding a nice location on a Mandelbrot fractal, and setting C1 and C2 to these.",
+			items: [{value:"mandelbrot", text:"Mandelbrot"},{value:"julia", text:"Julia"}],
+			set:setAlgorithm,
+			refresh: function(e, $i){$i.val(fractal.set("algorithm"));}
+			}),
+		addTextOption({
+			id: "option-c1",
+			text: "C1",
+			title: "The real part of the complex constant. Change this to alter the shape of the fractal (values between around -1 and 1 tend to work best).",
+			size:8,
+			change: enforceFloat,
+			set: setConstant1,
+			refresh: function(e, $i){$i.val(fractal.set("c1"));}
+			}),
+		addTextOption({
+			id: "option-c2",
+			text: "C2",
+			title: "The imaginary part of the complex constant. Change this to alter the shape of the fractal (values between around -1 and 1 tend to work best).",
+			size:8,
+			change: enforceFloat,
+			set: setConstant2,
+			refresh: function(e, $i){$i.val(fractal.set("c2"));}
+			})
+	);
+
+	$("#options-positional").append(
+		addTextOption({
+			id: "option-x",
+			text: "X", 
+			size:8, 
+			title:"Allows you to set the centre position relative to the fractal, in the X axis. Values between about -2 and 0.5 are sensible.", 
+			change: enforceFloat, 
+			set: setCentreX, 
+			refresh: function(e, $i){$i.val(fractal.set("cx"));}
+			}),
+		addTextOption({
+			id: "option-y",
+			text: "Y", 
+			size:8, 
+			title:"Allows you to set the centre position relative to the fractal, in the X axis. Values between about -1.2 and 1.2 are sensible.", 
+			change: enforceFloat, 
+			set: setCentreY, 
+			refresh: function(e, $i){$i.val(fractal.set("cy"));}
+			}),
+		addTextOption({
+			id: "option-zoom",
+			text: "Zoom",
+			size:8,
+			title: "Controls how far you are zoomed in to the fractal (centred around midpoint X,Y).",
+			change: enforceFloat,
+			set: setZoom,
+			refresh: function(e, $i){var a = zoomFromScale(); $i.val((a<100)?a.toFixed(2):a.toFixed(0));}
+			})
+	);
+
+
+	$("#options-visual").append(
+		addTextOption({
+			id: "option-maxiters",
+			text: "Max Iterations", 
+			size: 6, 
+			title:"Set this to a higher value in order to bring out more detail (higher values = longer rendering times).", 
+			maxlength: 6, 
+			change: enforceInt, 
+			set: setMaxIters, 
+			refresh: function(e, $i){$i.val(fractal.set("mi"));}
+			}),
+		addDropdownOption({
+			id: "option-quality",
+			text: "Quality", 
+			title:"Sets the quality at which the fractal is displayed (higher qualities lead to substantially slow rendering times; it will be slowed down by a factor of Quality squared)", 
+			items:[{value:0, text: "0 (lowest)"},{value:1, text: "1 (default)"},{value:2},{value:3, text: "3 (medium)"},{value:4},{value:5, text: "5 (high)"},{value:6},{value:7, text: "7 (ridiculous)"}],
+			set: setQuality, 
+			refresh: function(e, $i)
+				{
+				var q = fractal.set("quality"), s = fractal.set("smoothing");
+				var r = (q == 1 && s == false)? 0 : q;
+				$i.val(r);
+				}
+			})	
+	);
+	
+	$("#options-performance").append(
+		addTextOption({
+			id: "option-threads",
+			text: "Threads",
+			title: "Sets how many threads to use for rendering the fractal. If you have a multi-core machine, a higher value for this (not exceeding the number of real or virtual cores you have) can substantially speed up the rendering and saving of higher quality or higher max iteration fractals. Set to 0 to disable multiple threads entirely.",
+			size: 6,
+			maxlength: 4,
+			change: enforceInt,
+			set: setThreads,
+			refresh: function(e, $i){$i.val(fractal.set("threads"));}
+			})
+	);
+
+	//apply button:
+	$("#option-options #wrapper").append("<div id='options-set' class='button'>Apply</div><div id='options-reset' class='button'>Start Over</div>");
+
+	//add in save options:
+	$("#options-saveimage").prepend(
+		addTextOption({
+			id: "save-width",
+			text: "Width",
+			size: 6,
+			title: "Set the width of the output image",
+			change: setSaveWidth,
+			refresh: function(e, $i) {$i.val(w);},
+			})
+		);
+	$("#options-saveimage").append(
+		addTextOption({
+			id: "save-height",
+			text: "Height",
+			size: 6,
+			title: "Set the height of the output image",
+			change: setSaveHeight,
+			refresh: function(e, $i) {$i.val(h);},
+			}),
+		addDropdownOption({
+			id: "save-quality",
+			text: "Quality", 
+			title:"Sets the quality at which the fractal is saved", 
+			items:[{value:0, text: "0 (lowest)"},{value:1, text: "1 (default)"},{value:2},{value:3, text: "3 (medium)"},{value:4},{value:5, text: "5 (high)"},{value:6},{value:7, text: "7 (ridiculous)"}],
+			selected:3,
+			}),
+		"<div id='save-button' class='button'>Save Image</div>"
+	);
+
+	//add link which can be saved and button to shorten it:
+	$("#options-savelink").append(
+		addTextOption({
+			id: "save-link",
+			size:40,
+			text: "Link",
+			title: "This link will take you straight to your current fractal",
+			refresh: setLink,
+			change: setLink
+		}),
+		"<div id='shorten-link-button' class='button'>Shorten Link</div>"
+	);
+
+
+	//position elements:
+	var $tabs = $("#tabs");
+	$tabs.css("margin-left", -500);
+
+	document.onselectstart = function () { return false; };
+	if(!window.Worker) $("#options-performance").hide();
+	$(window).resize(canvasResize);
+	canvasResize();
+	start_sx = fractal.set("sx");
+	start_sy = fractal.set("sy");
+
+	$(".tab").on("click", function(e) { changeTab.call(this,e); });
+	if(!is_touch_device) $i_canvas.on("mousedown", function(e) {e.preventDefault(); zoomRectangle.call(this, e);});
+	if(is_touch_device) $i_canvas.one("touchstart", function(e) {e.preventDefault(); touchStart.call(this, e);});
+
+	$("#controls").on("click", function(e) {e.stopPropagation();});
+	$("#control-options").on("click", toggleTabs);
+	$("#control-zoomin").on("click", zoomIn);
+	$("#control-zoomout").on("click", zoomOut);
+
+	$("#save-link").on("click", function() { $(this).select(); });
+	$("#save-button").on("click", function(e) 
+		{
+		var sw = parseInt($("#save-width").val()), sh = parseInt($("#save-height").val());
+		if(sw > 0 && sh > 0) saveFractal(sw,sh,parseInt($("#save-quality").val()));
+		});
+	$("#saved-image-container .kill").on("click", function(e) {e.stopPropagation(); $savedimagecontainer.css("display", "none");});
+	$savedimagecontainer.on("click", function(e) {$savedimagecontainer.css("display", "none");});
+	$savedimagewrapper.on("click", function(e) {e.stopPropagation();});
+	$("#shorten-link-button").on("click", function(e)
+		{
+		var $button = $(this);
+		function beginShortening()
+			{
+			$button.css("width", $button.width());
+			$button.html("Shortening..");
+			}
+		function endShortening()
+			{
+			$button.html("Shorten Link");
+			$button.removeAttr("style");
+			}
+		beginShortening();
+		jQuery.ajax ({
+			url: "https://www.googleapis.com/urlshortener/v1/url",
+			type: "POST",
+			data: JSON.stringify({"longUrl":getLink() , "key":"AIzaSyADT3xe63Esab2faWsa0Hjq0Fuk_amYKpc" }),
+			dataType: "json",
+			contentType: "application/json; charset=utf-8",
+			success: function(e){
+				var res = e.id || "Sorry, there's been an error.";
+				$("#save-link").val(res);
+				endShortening();
+				}
+			});
+		});
+	$("#options-set").on("click", (function()
+		{
+		var $opts = $("#options");
+		return function()
+			{
+			$opts.find("[name]").trigger("set");
+			drawFractal();
+			}
+		})());
+	$("#options-reset").on("click", function()
+		{
+		resetOptions(); 
+		$("#colour-wrapper").gradientBar("refresh");
+		drawFractal();
+		});
+	$("#option-save-aspect").on("click", toggleAspect);
+	$(document).on("keydown", function(e)
+		{
+		//up key:
+		if(e.keyCode == 38) {e.preventDefault(); panUp();}
+		//down key:
+		else if(e.keyCode == 40) {e.preventDefault(); panDown();}
+		//left key:
+		else if(e.keyCode == 37) {e.preventDefault(); panLeft();}
+		//right key:
+		else if(e.keyCode == 39) {e.preventDefault(); panRight();}
+		});
+	$("#options").on("keydown", function(e) {e.stopPropagation();})
+	$("#options").on("click", function(e) {e.stopPropagation();})
+	$(document).on("mousewheel", function(e,d){mouseWheel(e,d);});
+	function mouseWheel(e,d)
+		{
+		if(d == -1) zoomOut(1.5);
+		else if(d == 1) {	pointToCentre(e.pageX, e.pageY); zoomIn(1.5); }
+		}
+	});
+
+</script>
+
+</body>
+
+</html>
